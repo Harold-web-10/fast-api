@@ -150,7 +150,7 @@ Tomé estas capturas para entregar la actividad:
 3. **Servidor:** terminal con `uvicorn app.main:app --reload` y el servidor iniciado.
   ![servidor](doc/img/servidor.png)
 4. **documentacion:** `/docs` mostrando la API y la sección `Users`.
- ![docs](doc/imd/documentacion.png) 
+ ![documentacion](doc/img/documentacion.png) 
 5. **GET /users:** usuarios de prueba y código `200`.
  ![gey user](doc/img/getuser.png)
 6. **GET /users/{user_id}:** usuario con ID `1` y código `200`.
@@ -159,7 +159,7 @@ Tomé estas capturas para entregar la actividad:
   ![post](doc/img/post.png)
 
 
-## Reflexión del aprendiz
+## Reflexión
 
 En esta actividad aprendí que FastAPI permite crear endpoints de forma organizada y que Swagger facilita las pruebas. También entendí que Pydantic valida los datos antes de que lleguen a la función. Al principio confundía los parámetros de ruta con los de consulta, pero ejemplos como `/users/1` y `/users?role=admin` me ayudaron a diferenciarlos. La lista en memoria me permitió concentrarme en FastAPI, aunque entendí que un proyecto real necesitaría una base de datos.
 
