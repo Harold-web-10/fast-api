@@ -150,7 +150,7 @@ Tomé estas capturas para entregar la actividad:
 3. **Servidor:** terminal con `uvicorn app.main:app --reload` y el servidor iniciado.
   ![servidor](doc/img/servidor.png)
 4. **documentacion:** `/docs` mostrando la API y la sección `Users`.
- ![docs](doc/imd/documentacion.png) 
+ ![documentacion](doc/imd/documentacion.png) 
 5. **GET /users:** usuarios de prueba y código `200`.
  ![gey user](doc/img/getuser.png)
 6. **GET /users/{user_id}:** usuario con ID `1` y código `200`.
