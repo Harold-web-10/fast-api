@@ -1,31 +1,38 @@
-from typing import Literal
+from typing import Optional, Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
 
-# Modelo que define los datos que el cliente envía al crear un usuario.
-# FastAPI usará este esquema para validar automáticamente la información
-# que llegue en el body de una petición POST.
+# Esquema para crear un usuario (POST).
+# Todos los campos son obligatorios excepto is_active que tiene valor por defecto.
 class UserCreate(BaseModel):
-    # name es obligatorio y debe tener mínimo 3 caracteres.
-    # Si el cliente envía menos, FastAPI devuelve un error 422.
     name: str = Field(min_length=3)
-
-    # email debe tener formato de correo válido.
-    # EmailStr viene de email-validator y revisa que tenga @ y dominio.
     email: EmailStr
-
-    # role solo puede ser uno de estos tres valores literales.
-    # Cualquier otro valor causa un error de validación 422.
     role: Literal["admin", "support", "user"]
-
-    # is_active debe ser un valor booleano: true o false.
-    # No se aceptan strings como "true" ni números.
-    is_active: bool
+    is_active: bool = True
 
 
-# Modelo de respuesta que hereda de UserCreate y agrega el id.
-# Se usa para definir exactamente qué campos se devuelven al cliente,
-# evitando exponer datos internos o campos no autorizados.
+# Esquema para actualizar un usuario completo (PUT).
+# Todos los campos son opcionales porque el cliente puede enviar solo los que quiera cambiar.
+# Sin embargo, PUT debe recibir todos los datos del usuario, así que en la ruta
+# validaremos que al menos vengan los campos necesarios.
+class UserUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=3)
+    email: Optional[EmailStr] = None
+    role: Optional[Literal["admin", "support", "user"]] = None
+    is_active: Optional[bool] = None
+
+
+# Esquema para actualizar parcialmente un usuario (PATCH).
+# Todos los campos son opcionales. El cliente envía solo los que desea modificar.
+class UserPatch(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=3)
+    email: Optional[EmailStr] = None
+    role: Optional[Literal["admin", "support", "user"]] = None
+    is_active: Optional[bool] = None
+
+
+# Esquema de respuesta. Hereda de UserCreate y agrega id.
+# Se usa para definir la estructura de los datos que la API devuelve.
 class UserResponse(UserCreate):
     id: int
