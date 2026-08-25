@@ -290,8 +290,7 @@ Para la entrega tomar estas capturas:
 
 
 ## Reflexión
-
-En la Clase 7 aprendí los fundamentos: rutas GET y POST, parámetros de ruta y consulta, validaciones con Pydantic y Response Models. En esta Clase 8 entendí cómo evolucionar ese proyecto hacia un CRUD completo.
+ los fundamentos: rutas GET y POST, parámetros de ruta y consulta, validaciones con Pydantic y Response Models. En esta Clase 8 entendí cómo evolucionar ese proyecto hacia un CRUD completo.
 
 Lo que más me costó fue separar la lógica en servicios y dependencias. Al principio todo estaba en las rutas y funcionaba, pero cuando agregué PUT, PATCH y DELETE me di cuenta de que estaba repitiendo mucho código. Crear `user_service.py` me ayudó a centralizar la lógica y las rutas quedaron más limpias.
 
