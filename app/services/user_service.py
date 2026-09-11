@@ -1,88 +1,127 @@
 from typing import Literal
 
-from app.data.users_db import users
-from app.schemas.user_schema import UserCreate, UserResponse
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.models.user_model import User
+from app.schemas.user_schema import UserCreate, UserPatch, UserUpdate
 
 
-# Servicio: contiene la lógica de negocio de los usuarios.
-# Las rutas delegan aquí las operaciones para mantener el código organizado.
-# Si en el futuro cambiamos a base de datos, solo se modifica este archivo.
+SortField = Literal["name", "created_at"]
+SortOrder = Literal["asc", "desc"]
 
 
-def get_all_users(role: str | None = None, is_active: bool | None = None):
-    # Devuelve todos los usuarios, con filtros opcionales.
-    result = users
+def get_all_users(
+    db: Session,
+    role: str | None = None,
+    is_active: bool | None = None,
+    sort_by: SortField = "created_at",
+    order: SortOrder = "asc",
+) -> list[User]:
+    statement = select(User)
 
     if role is not None:
-        result = [user for user in result if user["role"] == role]
+        statement = statement.where(User.role == role)
 
     if is_active is not None:
-        result = [user for user in result if user["is_active"] == is_active]
+        statement = statement.where(User.is_active == is_active)
 
-    return result
+    sort_column = User.name if sort_by == "name" else User.created_at
+    sort_operation = sort_column.asc() if order == "asc" else sort_column.desc()
+    statement = statement.order_by(sort_operation, User.id.asc())
 
-
-def get_user_by_id(user_id: int):
-    # Busca un usuario por ID. Si no lo encuentra, devuelve None.
-    for user in users:
-        if user["id"] == user_id:
-            return user
-    return None
+    return list(db.scalars(statement).all())
 
 
-def create_user(user_data: UserCreate):
-    # Crea un usuario nuevo después de validar el correo duplicado.
-    for existing_user in users:
-        if existing_user["email"] == user_data.email:
-            raise ValueError("El correo ya está registrado")
-
-    new_id = max((u["id"] for u in users), default=0) + 1
-    new_user = {
-        "id": new_id,
-        **user_data.model_dump()
-    }
-    users.append(new_user)
-    return new_user
+def get_user_by_id(db: Session, user_id: int) -> User | None:
+    return db.get(User, user_id)
 
 
-def update_user(user_id: int, user_data: UserCreate):
-    # Reemplaza completamente los datos de un usuario existente.
-    user = get_user_by_id(user_id)
-    if user is None:
-        raise LookupError("Usuario no encontrado")
+def get_user_by_email(db: Session, email: str, exclude_id: int | None = None) -> User | None:
+    statement = select(User).where(User.email == email)
+    if exclude_id is not None:
+        statement = statement.where(User.id != exclude_id)
+    return db.scalar(statement)
 
-    # Verificamos correo duplicado, ignorando el propio usuario actual.
-    for existing_user in users:
-        if existing_user["email"] == user_data.email and existing_user["id"] != user_id:
-            raise ValueError("El correo ya está registrado")
 
-    user.update(user_data.model_dump())
+def create_user(db: Session, user_data: UserCreate) -> User:
+    email = str(user_data.email)
+
+    if get_user_by_email(db, email) is not None:
+        raise ValueError("El correo ya está registrado")
+
+    user = User(
+        name=user_data.name,
+        email=email,
+        role=user_data.role,
+        is_active=user_data.is_active,
+    )
+    db.add(user)
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise ValueError("El correo ya está registrado") from exc
+
+    db.refresh(user)
     return user
 
 
-def patch_user(user_id: int, updates: dict):
-    # Actualiza solo los campos enviados en el diccionario.
-    user = get_user_by_id(user_id)
+def update_user(db: Session, user_id: int, user_data: UserUpdate) -> User:
+    user = get_user_by_id(db, user_id)
+    if user is None:
+        raise LookupError("Usuario no encontrado")
+
+    updates = user_data.model_dump(exclude_unset=True, exclude_none=True)
+    email = updates.get("email")
+
+    if email is not None and get_user_by_email(db, str(email), exclude_id=user_id) is not None:
+        raise ValueError("El correo ya está registrado")
+
+    for field, value in updates.items():
+        setattr(user, field, value)
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise ValueError("El correo ya está registrado") from exc
+
+    db.refresh(user)
+    return user
+
+
+def patch_user(db: Session, user_id: int, updates: dict) -> User:
+    user = get_user_by_id(db, user_id)
     if user is None:
         raise LookupError("Usuario no encontrado")
 
     if not updates:
         raise ValueError("No se enviaron datos para actualizar")
 
-    # Verificamos correo duplicado si viene en la actualización.
-    if "email" in updates:
-        for existing_user in users:
-            if existing_user["email"] == updates["email"] and existing_user["id"] != user_id:
-                raise ValueError("El correo ya está registrado")
+    email = updates.get("email")
+    if email is not None and get_user_by_email(db, str(email), exclude_id=user_id) is not None:
+        raise ValueError("El correo ya está registrado")
 
-    user.update(updates)
+    for field, value in updates.items():
+        setattr(user, field, value)
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise ValueError("El correo ya está registrado") from exc
+
+    db.refresh(user)
     return user
 
 
-def delete_user(user_id: int):
-    # Elimina un usuario por ID.
-    user = get_user_by_id(user_id)
+def delete_user(db: Session, user_id: int) -> None:
+    user = get_user_by_id(db, user_id)
     if user is None:
         raise LookupError("Usuario no encontrado")
 
-    users.remove(user)
+    db.delete(user)
+    db.commit()
