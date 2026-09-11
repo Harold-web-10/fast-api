@@ -98,92 +98,6 @@ Esto crea la tabla `users` si aún no existe, sin borrar los registros guardados
 | `PATCH` | `/users/{user_id}` | Actualiza parcialmente un usuario | `200 OK` |
 | `DELETE` | `/users/{user_id}` | Elimina un usuario | `204 No Content` |
 
-### Filtros y ordenamiento
-
-`GET /users` mantiene los filtros existentes:
-
-```text
-GET /users?role=admin
-GET /users?is_active=true
-GET /users?role=admin&is_active=true
-```
-
-También admite:
-
-```text
-GET /users?sort_by=name&order=asc
-GET /users?sort_by=created_at&order=desc
-```
-
-Los valores válidos son:
-
-- `role`: `admin`, `support` o `user`.
-- `sort_by`: `name` o `created_at`.
-- `order`: `asc` o `desc`.
-
-### Crear un usuario
-
-```json
-{
-  "name": "Pedro Perez",
-  "email": "pedro@example.com",
-  "role": "user",
-  "is_active": true
-}
-```
-
-```text
-POST /users
-```
-
-La respuesta incluye el `id` y `created_at` asignados por la base de datos.
-
-### Consultar usuarios
-
-```text
-GET /users
-GET /users/1
-```
-
-### Actualizar con PUT
-
-PUT acepta los campos que se desean reemplazar y exige enviar al menos uno:
-
-```json
-{
-  "name": "Pedro Perez Actualizado",
-  "email": "pedro.nuevo@example.com",
-  "role": "support",
-  "is_active": true
-}
-```
-
-```text
-PUT /users/1
-```
-
-### Actualizar con PATCH
-
-PATCH modifica únicamente los campos enviados:
-
-```json
-{
-  "role": "admin"
-}
-```
-
-```text
-PATCH /users/1
-```
-
-### Eliminar un usuario
-
-```text
-DELETE /users/1
-```
-
-Una eliminación exitosa devuelve `204 No Content`, sin cuerpo de respuesta.
-
 ## Modelo SQLAlchemy y schema Pydantic
 
 El modelo SQLAlchemy representa la estructura real de la tabla:
@@ -304,12 +218,8 @@ datos guardados
 
 ## Reflexión
 
-En la Clase 7 aprendí los fundamentos: rutas GET y POST, parámetros de ruta y consulta, validaciones con Pydantic y Response Models. En esta Clase 8 entendí cómo evolucionar ese proyecto hacia un CRUD completo.
+La lista en memoria fue útil para comprender las rutas, las validaciones de Pydantic, los códigos HTTP y la separación entre rutas, servicios y dependencias. Sin embargo, también mostró una limitación importante: los datos desaparecían cada vez que se reiniciaba la aplicación.
 
-Lo que más me costó fue separar la lógica en servicios y dependencias. Al principio todo estaba en las rutas y funcionaba, pero cuando agregué PUT, PATCH y DELETE me di cuenta de que estaba repitiendo mucho código. Crear `user_service.py` me ayudó a centralizar la lógica y las rutas quedaron más limpias.
+También reforcé el valor de organizar el proyecto en capas. Las rutas se encargan de recibir las peticiones y devolver respuestas HTTP, los servicios contienen la lógica de acceso a los datos, los modelos describen la tabla y los schemas validan la información que entra y sale. Esta separación hace que el código sea más claro, reutilizable y fácil de mantener.
 
-Dependency Injection con `Depends()` al principio me pareció innecesaria, pero después de usarla en `get_user_or_404` entendí su valor: evito repetir la búsqueda de usuario y el manejo de 404 en cada endpoint. Si en el futuro necesito agregar permisos o autenticación, ya tengo el patrón listo.
-
-También entendí mejor los códigos HTTP. Antes usaba 200 para todo, pero ahora sé que 201 es para creación, 204 para eliminación sin contenido y 400 para errores del cliente. Swagger y ReDoc son mucho más útiles cuando los endpoints tienen buena documentación con `summary` y `description`.
-
-La lista en memoria sigue siendo una limitación, pero me permitió concentrarme en FastAPI sin distraerme con bases de datos. Ahora entiendo por qué en un proyecto real se separan las capas: rutas, servicios, datos y dependencias. No es sobreingeniería, es organización.
+La implementación de `Depends()` para obtener la sesión de base de datos y buscar un usuario existente permitió centralizar responsabilidades que antes estaban repetidas en varias rutas. Además, las pruebas de los endpoints y la comprobación de los datos después de reiniciar el servidor confirmaron que la persistencia funciona correctamente.
