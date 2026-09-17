@@ -223,3 +223,219 @@ La lista en memoria fue útil para comprender las rutas, las validaciones de Pyd
 También reforcé el valor de organizar el proyecto en capas. Las rutas se encargan de recibir las peticiones y devolver respuestas HTTP, los servicios contienen la lógica de acceso a los datos, los modelos describen la tabla y los schemas validan la información que entra y sale. Esta separación hace que el código sea más claro, reutilizable y fácil de mantener.
 
 La implementación de `Depends()` para obtener la sesión de base de datos y buscar un usuario existente permitió centralizar responsabilidades que antes estaban repetidas en varias rutas. Además, las pruebas de los endpoints y la comprobación de los datos después de reiniciar el servidor confirmaron que la persistencia funciona correctamente.
+
+## Guía 10 — FastAPI Avanzado
+
+### Objetivo de la ampliación
+
+Esta evolución conserva el CRUD de usuarios existente y agrega una gestión académica de dispositivos y préstamos. El sistema permite registrar equipos, consultar su disponibilidad, prestarlos a un usuario, devolverlos y consultar su historial sin perder los datos almacenados en SQLite.
+
+### Arquitectura utilizada
+
+El proyecto mantiene la organización existente en capas:
+
+- `app/routes/`: recibe las peticiones HTTP, valida parámetros y define los códigos de respuesta.
+- `app/services/`: contiene la lógica de acceso a SQLAlchemy y las reglas de negocio.
+- `app/models/`: define las tablas y relaciones con SQLAlchemy.
+- `app/schemas/`: valida las entradas y modela las respuestas con Pydantic v2.
+- `app/dependencies/`: crea y cierra las sesiones de base de datos.
+- `app/database/connection.py`: configura el motor SQLite y `Base`.
+- `alembic/`: almacena la configuración y las migraciones del esquema.
+
+Se conservan FastAPI, SQLAlchemy, SQLite, Pydantic v2 y Uvicorn. El CRUD de `/users` no fue reescrito.
+
+### Alembic y migraciones
+
+Alembic utiliza la misma URL del proyecto:
+
+```text
+sqlite:///./device_systems.db
+```
+
+`alembic/env.py` importa los modelos y conecta `Base.metadata` para permitir `--autogenerate`. La migración de esta ampliación crea `devices` y `loans`, pero no elimina ni recrea `users`.
+
+Comandos comprobados:
+
+```powershell
+alembic init alembic
+alembic revision --autogenerate -m "create devices and loans tables"
+alembic upgrade head
+alembic history
+alembic check
+```
+
+La migración generada es:
+
+```text
+8ed67c3531e9_create_devices_and_loans_tables.py
+```
+
+### Modelo Device
+
+La tabla `devices` contiene:
+
+- `id`: clave primaria.
+- `name`: nombre obligatorio.
+- `serial_number`: número de serie obligatorio y único.
+- `device_type`: tipo obligatorio.
+- `brand`: marca opcional.
+- `is_available`: disponibilidad, con valor inicial `True`.
+- `created_at`: fecha de creación.
+
+### Modelo Loan
+
+La tabla `loans` contiene:
+
+- `id`: clave primaria.
+- `user_id`: Foreign Key hacia `users.id`.
+- `device_id`: Foreign Key hacia `devices.id`.
+- `loan_date`: fecha del préstamo.
+- `return_date`: fecha opcional para préstamos activos.
+- `status`: `active`, `returned` u `overdue`.
+
+### Relaciones
+
+Se implementaron relaciones con `relationship()` y `back_populates`:
+
+```text
+User 1 ---- * Loan
+Device 1 ---- * Loan
+```
+
+Un usuario puede tener varios préstamos. Un dispositivo puede tener varios préstamos históricos. Cada préstamo pertenece a un usuario y a un dispositivo.
+
+### CRUD de dispositivos
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `GET` | `/devices` | Lista dispositivos con filtros opcionales |
+| `GET` | `/devices/{device_id}` | Consulta un dispositivo |
+| `POST` | `/devices` | Crea un dispositivo |
+| `PUT` | `/devices/{device_id}` | Actualiza un dispositivo |
+| `PATCH` | `/devices/{device_id}` | Actualiza campos parciales |
+| `DELETE` | `/devices/{device_id}` | Elimina un dispositivo sin préstamos registrados |
+
+Filtros disponibles en `GET /devices`:
+
+- `device_type`
+- `is_available`
+- `brand`
+- `search`
+
+### Sistema de préstamos
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `GET` | `/loans` | Lista préstamos |
+| `GET` | `/loans/details` | Lista préstamos con usuario y dispositivo |
+| `GET` | `/loans/{loan_id}` | Consulta un préstamo |
+| `POST` | `/loans` | Crea un préstamo activo |
+| `PATCH` | `/loans/{loan_id}/return` | Devuelve el préstamo y el dispositivo |
+| `GET` | `/users/{user_id}/loans` | Historial de un usuario |
+| `GET` | `/devices/{device_id}/loans` | Historial de un dispositivo |
+
+Al crear un préstamo se valida que el usuario exista, el dispositivo exista y esté disponible. Después se crea el préstamo y el dispositivo pasa a `is_available=False`. Al devolverlo se registra `return_date`, el estado cambia a `returned` y el dispositivo vuelve a estar disponible.
+
+### Joins y filtros avanzados
+
+Las consultas de préstamos usan SQLAlchemy con `.join()`, `.where()`, `.ilike()`, `and_()` y `or_()`.
+
+Ejemplos:
+
+```text
+GET /loans?status=active
+GET /loans?user_email=aprendiz@sena.edu.co
+GET /loans?device_type=laptop
+GET /loans?search=portatil
+```
+
+Los filtros son opcionales y se combinan correctamente cuando se envían varios en una sola petición.
+
+### Manejo de errores
+
+| Situación | Código HTTP |
+|---|---:|
+| Usuario con préstamos registrados | `409` |
+| Usuario, dispositivo o préstamo no encontrado | `404` |
+| Número de serie duplicado | `400` |
+| Dispositivo no disponible | `409` |
+| Dispositivo con préstamos registrados | `409` |
+| Préstamo ya devuelto o estado incompatible | `409` |
+| Datos inválidos según Pydantic | `422` |
+
+El comportamiento existente de `/users` se conserva, incluyendo sus validaciones y respuestas.
+
+### Swagger/OpenAPI
+
+La documentación está organizada con los tags:
+
+- `Users`
+- `Devices`
+- `Loans`
+
+Cada endpoint incluye `summary`, `description` y `response_description`. Con el servidor activo, consultar:
+
+```text
+http://127.0.0.1:8000/docs
+http://127.0.0.1:8000/redoc
+http://127.0.0.1:8000/openapi.json
+```
+
+### Comandos para ejecutar el proyecto
+
+```powershell
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+alembic upgrade head
+uvicorn app.main:app --reload
+```
+
+También puede usarse el entorno local existente:
+
+```powershell
+.\sistema\Scripts\python.exe -m pip install -r requirements.txt
+.\sistema\Scripts\alembic.exe upgrade head
+.\sistema\Scripts\python.exe -m uvicorn app.main:app --reload
+```
+
+### Checklist de pruebas para Swagger o Postman
+
+1. Crear un usuario y confirmar `201`.
+2. Crear un dispositivo y confirmar `201`.
+3. Consultar `GET /devices` y sus filtros.
+4. Actualizar con `PUT` y `PATCH`.
+5. Crear un préstamo y confirmar que el dispositivo queda no disponible.
+6. Intentar prestar el mismo dispositivo y confirmar `409`.
+7. Consultar `GET /loans`.
+8. Consultar `GET /loans/details`.
+9. Filtrar por `status`, `user_email` y `device_type`.
+10. Consultar `/users/{user_id}/loans`.
+11. Consultar `/devices/{device_id}/loans`.
+12. Devolver el préstamo y confirmar que el dispositivo queda disponible.
+13. Devolver el mismo préstamo nuevamente y confirmar `409`.
+14. Enviar un número de serie duplicado y confirmar `400`.
+15. Enviar datos inválidos y confirmar `422`.
+16. Revisar `/docs` y `/redoc`.
+
+### Evidencia y capturas de pantalla
+
+- [CAPTURA: alembic init]
+- [CAPTURA: alembic revision --autogenerate]
+- [CAPTURA: alembic upgrade head]
+- [CAPTURA: estructura de tablas]
+- [CAPTURA: Swagger /docs]
+- [CAPTURA: creación de usuario]
+- [CAPTURA: creación de dispositivo]
+- [CAPTURA: creación de préstamo]
+- [CAPTURA: /loans/details]
+- [CAPTURA: filtros]
+- [CAPTURA: devolución del dispositivo]
+
+### Reflexión
+
+Las migraciones son importantes porque permiten evolucionar la base de datos sin borrar la información que ya existe. En este proyecto, Alembic agregó las tablas `devices` y `loans` manteniendo los usuarios guardados.
+
+También aprendí que las relaciones entre tablas permiten representar mejor la realidad: un usuario puede realizar varios préstamos y un dispositivo puede tener un historial. Los Foreign Keys sirven para conectar los registros y dejar claro a qué usuario y dispositivo pertenece cada préstamo.
+
+Con `join()` aprendí a consultar datos relacionados en una sola consulta, en lugar de hacer varias búsquedas separadas. Los filtros hacen que las consultas sean más útiles porque permiten encontrar préstamos por estado, correo o tipo de dispositivo y combinar varias condiciones cuando sea necesario.
