@@ -6,6 +6,7 @@ from app.dependencies.user_dependencies import get_user_or_404
 from app.models.user_model import User
 from app.schemas.user_schema import UserCreate, UserPatch, UserResponse, UserUpdate, UserRole
 from app.services.user_service import (
+    UserInUseError,
     SortField,
     SortOrder,
     create_user as service_create_user,
@@ -148,5 +149,7 @@ def remove_user(
 ):
     try:
         service_delete_user(db, user_id)
+    except UserInUseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except LookupError:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")

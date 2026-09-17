@@ -4,8 +4,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.models.loan_model import Loan
 from app.models.user_model import User
 from app.schemas.user_schema import UserCreate, UserPatch, UserUpdate
+
+
+class UserInUseError(Exception):
+    pass
 
 
 SortField = Literal["name", "created_at"]
@@ -122,6 +127,9 @@ def delete_user(db: Session, user_id: int) -> None:
     user = get_user_by_id(db, user_id)
     if user is None:
         raise LookupError("Usuario no encontrado")
+
+    if db.scalar(select(Loan.id).where(Loan.user_id == user_id).limit(1)) is not None:
+        raise UserInUseError("El usuario tiene préstamos registrados")
 
     db.delete(user)
     db.commit()
