@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import asyncio
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security, status
 from sqlalchemy.orm import Session
 
 from app.dependencies.database_dependency import get_db
 from app.schemas.loan_schema import LoanCreate, LoanDetailResponse, LoanResponse, LoanStatus
+from app.security import get_current_user, oauth2_scheme
 from app.services.loan_service import (
     DeviceUnavailableError,
     LoanAlreadyReturnedError,
@@ -22,31 +25,32 @@ router = APIRouter(tags=["Loans"])
 @router.get(
     "/loans/details",
     response_model=list[LoanDetailResponse],
-    summary="Listar préstamos detallados",
-    description="Obtiene préstamos con la información básica del usuario y del dispositivo asociado.",
-    response_description="Lista de préstamos detallados",
+    summary="Listar préstamo detallados",
+    description="Obtiene préstamo con la información básica del usuario y del dispositivo asociado.",
+    response_description="Lista de préstamo detallados",
 )
-def get_loan_details(
+async def get_loan_details(
     db: Session = Depends(get_db),
 ):
-    return get_all_loans(db)
+    return await asyncio.to_thread(get_all_loans, db)
 
 
 @router.get(
     "/loans",
     response_model=list[LoanResponse],
-    summary="Listar préstamos",
-    description="Obtiene préstamos. Permite filtrar por estado, correo del usuario, tipo de dispositivo y texto de búsqueda.",
-    response_description="Lista de préstamos encontrados",
+    summary="Listar préstamo",
+    description="Obtiene préstamo. Permite filtrar por estado, correo del usuario, tipo de dispositivo y texto de búsqueda.",
+    response_description="Lista de préstamo encontrados",
 )
-def get_loans(
+async def get_loans(
     status: LoanStatus | None = Query(default=None, description="Filtra por estado: active, returned u overdue"),
     user_email: str | None = Query(default=None, description="Filtra por correo del usuario"),
     device_type: str | None = Query(default=None, description="Filtra por tipo de dispositivo"),
     search: str | None = Query(default=None, description="Busca en usuarios, dispositivos o estado"),
     db: Session = Depends(get_db),
 ):
-    return get_all_loans(
+    return await asyncio.to_thread(
+        get_all_loans,
         db,
         status=status,
         user_email=user_email,
@@ -62,11 +66,11 @@ def get_loans(
     description="Busca un préstamo por su identificador único.",
     response_description="Préstamo encontrado",
 )
-def get_loan(
+async def get_loan(
     loan_id: int,
     db: Session = Depends(get_db),
 ):
-    loan = get_loan_by_id(db, loan_id)
+    loan = await asyncio.to_thread(get_loan_by_id, db, loan_id)
     if loan is None:
         raise HTTPException(status_code=404, detail="Préstamo no encontrado")
     return loan
@@ -76,16 +80,18 @@ def get_loan(
     "/loans",
     response_model=LoanResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Crear préstamo",
-    description="Registra un préstamo cuando el usuario y el dispositivo existen y el dispositivo está disponible.",
+    summary="Creación de préstamo",
+    description="Registra un préstamo cuando el usuario y el dispositivo existen y el dispositivo está disponible. Requiere autenticación.",
     response_description="Préstamo creado exitosamente",
 )
-def create_loan(
+async def create_loan(
+    request: Request,
     loan: LoanCreate,
     db: Session = Depends(get_db),
+    _: str = Security(oauth2_scheme),
 ):
     try:
-        return service_create_loan(db, loan)
+        return await asyncio.to_thread(service_create_loan, db, loan)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except DeviceUnavailableError as exc:
@@ -96,15 +102,17 @@ def create_loan(
     "/loans/{loan_id}/return",
     response_model=LoanResponse,
     summary="Devolver préstamo",
-    description="Marca un préstamo como devuelto, registra la fecha y devuelve la disponibilidad del dispositivo.",
+    description="Marca un préstamo como devuelto, registra la fecha y devuelve la disponibilidad del dispositivo. Requiere autenticación.",
     response_description="Préstamo devuelto exitosamente",
 )
-def return_loan(
+async def return_loan(
+    request: Request,
     loan_id: int,
     db: Session = Depends(get_db),
+    _: str = Security(oauth2_scheme),
 ):
     try:
-        return service_return_loan(db, loan_id)
+        return await asyncio.to_thread(service_return_loan, db, loan_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except LoanAlreadyReturnedError as exc:
@@ -116,16 +124,16 @@ def return_loan(
 @router.get(
     "/users/{user_id}/loans",
     response_model=list[LoanResponse],
-    summary="Listar préstamos de un usuario",
-    description="Obtiene el historial de préstamos asociado a un usuario.",
-    response_description="Historial de préstamos del usuario",
+    summary="Listar préstamo de un usuario",
+    description="Obtiene el historial de préstamo asociado a un usuario.",
+    response_description="Historial de préstamo del usuario",
 )
-def get_user_loan_history(
+async def get_user_loan_history(
     user_id: int,
     db: Session = Depends(get_db),
 ):
     try:
-        return get_user_loans(db, user_id)
+        return await asyncio.to_thread(get_user_loans, db, user_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -133,15 +141,15 @@ def get_user_loan_history(
 @router.get(
     "/devices/{device_id}/loans",
     response_model=list[LoanResponse],
-    summary="Listar préstamos de un dispositivo",
-    description="Obtiene el historial de préstamos asociado a un dispositivo.",
-    response_description="Historial de préstamos del dispositivo",
+    summary="Listar préstamo de un dispositivo",
+    description="Obtiene el historial de préstamo asociado a un dispositivo.",
+    response_description="Historial de dispositivo del dispositivo",
 )
-def get_device_loan_history(
+async def get_device_loan_history(
     device_id: int,
     db: Session = Depends(get_db),
 ):
     try:
-        return get_device_loans(db, device_id)
+        return await asyncio.to_thread(get_device_loans, db, device_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

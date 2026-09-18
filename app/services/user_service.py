@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.loan_model import Loan
 from app.models.user_model import User
 from app.schemas.user_schema import UserCreate, UserPatch, UserUpdate
+from app.security import hash_password
 
 
 class UserInUseError(Exception):
@@ -61,6 +62,8 @@ def create_user(db: Session, user_data: UserCreate) -> User:
         email=email,
         role=user_data.role,
         is_active=user_data.is_active,
+        # La contraseña se almacena hasheada, nunca en texto plano.
+        password_hash=hash_password(user_data.password),
     )
     db.add(user)
 
@@ -84,6 +87,10 @@ def update_user(db: Session, user_id: int, user_data: UserUpdate) -> User:
 
     if email is not None and get_user_by_email(db, str(email), exclude_id=user_id) is not None:
         raise ValueError("El correo ya está registrado")
+
+    # Si se envía una nueva contraseña, hay que hashearla.
+    if "password" in updates:
+        updates["password_hash"] = hash_password(updates.pop("password"))
 
     for field, value in updates.items():
         setattr(user, field, value)
@@ -109,6 +116,10 @@ def patch_user(db: Session, user_id: int, updates: dict) -> User:
     email = updates.get("email")
     if email is not None and get_user_by_email(db, str(email), exclude_id=user_id) is not None:
         raise ValueError("El correo ya está registrado")
+
+    # Si se envía una nueva contraseña, hay que hashearla.
+    if "password" in updates:
+        updates["password_hash"] = hash_password(updates.pop("password"))
 
     for field, value in updates.items():
         setattr(user, field, value)
