@@ -1,12 +1,18 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
-from fastapi.responses import Response
+from fastapi import FastAPI
+from fastapi.responses import ORJSONResponse
 
 from app.database.connection import Base, engine
+from app.middleware import (
+    configure_auth_middleware,
+    configure_cors,
+    register_logging_middleware,
+)
 from app.models.device_model import Device
 from app.models.loan_model import Loan
 from app.models.user_model import User
+from app.routes.auth_routes import router as auth_router
 from app.routes.device_routes import router as device_router
 from app.routes.loan_routes import router as loan_router
 from app.routes.user_routes import router as user_router
@@ -37,21 +43,41 @@ app = FastAPI(
         },
         {
             "name": "Loans",
-            "description": "Gestión de préstamos, devoluciones, relaciones y filtros avanzados.",
+            "description": "Gestión de préstamo, devoluciones, relaciones y filtros avanzados.",
+        },
+        {
+            "name": "Auth",
+            "description": "Autenticación con JWT y OAuth2PasswordBearer.",
         },
     ],
     lifespan=lifespan,
+    # Respuesta optimizada con ORJSON (más rápida que JSONResponse estándar).
+    default_response_class=ORJSONResponse,
 )
 
 
-@app.middleware("http")
-async def add_app_headers(request: Request, call_next):
-    response: Response = await call_next(request)
-    response.headers["X-App-Name"] = "device_systems"
-    response.headers["X-API-Version"] = "1.0"
-    return response
+# ---------------------------------------------------------------------------
+# Pila de middlewares (orden de ejecución, de externo a interno):
+#
+#   Petición:  ServerErrorMiddleware -> CORSMiddleware -> AuthMiddleware
+#              -> LoggingMiddleware -> Router -> Endpoint
+#   Respuesta: Router -> Endpoint -> LoggingMiddleware -> AuthMiddleware
+#              -> CORSMiddleware -> ServerErrorMiddleware -> Cliente
+#
+# ServerErrorMiddleware es el que Starlette inserta automáticamente como
+# el más externo (manejo global de excepciones).
+# ---------------------------------------------------------------------------
+# CORS: permite que un frontend de otro origen consuma la API.
+configure_cors(app)
+
+# Auth: autenticación/autorización vía JWT en la pila de middlewares.
+configure_auth_middleware(app)
+
+# Logging: registra método, ruta, tiempo de respuesta y agrega headers.
+register_logging_middleware(app)
 
 
 app.include_router(user_router)
 app.include_router(device_router)
 app.include_router(loan_router)
+app.include_router(auth_router)

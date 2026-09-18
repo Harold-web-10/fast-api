@@ -432,6 +432,102 @@ También puede usarse el entorno local existente:
 - [CAPTURA: filtros]
 - [CAPTURA: devolución del dispositivo]
 
+## Guía 11 — Middleware, CORS y Autenticación
+
+### Objetivo de la ampliación
+Esta evolución conserva todo el trabajo anterior (CRUD de usuarios, dispositivos, préstamos, joins, filtros, Alembic) y agrega una capa de seguridad: middleware de registro, CORS, autenticación JWT con OAuth2PasswordBearer, hashing de contraseñas y protección de endpoints.
+
+### Middleware
+Un **middleware** es un componente que se ejecuta **antes y después** de cada endpoint. Intercepta la solicitud, puede agregar información o transformar la respuesta, y luego la pasa al siguiente componente de la cadena.
+
+En el proyecto el middleware `log_request_middleware` (en `app/main.py`) realiza:
+- Registrar el método HTTP y la ruta de la solicitud.
+- Medir el tiempo de procesamiento con `time.perf_counter()`.
+- Agregar los headers `X-App-Name`, `X-API-Version` y `X-Response-Time`.
+- Imprimir un resumen por consola: `[GET] /users -> 200 (3.92ms)`.
+
+El ciclo es:
+```
+Request → Middleware → Endpoint → Response → Middleware → Cliente
+```
+Los headers `X-App-Name` y `X-API-Version` se conservan de versiones anteriores.
+
+### CORS
+**CORS** (Cross-Origin Resource Sharing) es un protocolo que permite a un frontend (por ejemplo, una página web en `http://localhost:3000`) consumir la API que corre en otro puerto u origen. Sin él, el navegador bloquea esas peticiones por seguridad.
+
+Se configura con `CORSMiddleware` en `app/main.py`:
+- `allow_origins=["*"]`: permite cualquier origen (en producción conviene restringirlo).
+- `allow_methods`: GET, POST, PUT, PATCH, DELETE, OPTIONS.
+- `allow_headers`: Authorization, Content-Type (para poder enviar `Bearer TOKEN`).
+- `allow_credentials=False`: no se usan cookies, por lo que no es necesario.
+
+Tanto `/docs` como `/redoc` siguen funcionando correctamente.
+
+### Autenticación
+La autenticación utiliza el modelo `User` **existente**. No se creó otra tabla ni otro modelo.
+
+Flujo:
+1. El usuario envía credenciales a `POST /auth/login`.
+2. Se valida que exista, esté activo y que la contraseña sea correcta.
+3. Se genera un **JWT** firmado con `python-jose` (HS256).
+4. El cliente envía el token como `Authorization: Bearer <token>`.
+5. La dependencia `get_current_user` decodifica el token y busca el usuario.
+
+#### Contraseñas
+Se agregó el campo `password_hash` al modelo `User` (migración Alembic `525bb9e02b1b`). Las funciones `hash_password()` y `verify_password()` usan `passlib` con `bcrypt`. **Nunca se guarda ni devuelve la contraseña en texto plano.**
+
+#### JWT
+Configuración (variables de entorno con valores por defecto para desarrollo):
+- `SECRET_KEY`: clave de firma.
+- `ALGORITHM`: HS256.
+- `ACCESS_TOKEN_EXPIRE_MINUTES`: 60.
+
+El token incluye `sub = user.id`, `email` y `role`. No incluye `password` ni `password_hash`.
+
+#### OAuth2PasswordBearer
+La clase `OAuth2PasswordBearer` (en `app/security.py`) define el esquema de autenticación. En Swagger, aparece un botón **Authorize** donde se puede pegar el token como `Bearer <token>`.
+
+#### get_current_user
+Dependencia reutilizable que:
+- Extrae el token del header `Authorization`.
+- Lo decodifica y obtiene el `sub` (user_id).
+- Busca el `User` en la BD.
+- Valida que exista y que esté activo.
+- Si algo falla, responde **401 Unauthorized** con `WWW-Authenticate: Bearer`.
+
+### Protección de endpoints
+Se protegió con `Depends(get_current_user)` las operaciones de modificación:
+- `POST`, `PUT`, `PATCH`, `DELETE` de `/users`, `/devices` y `/loans`.
+
+Los endpoints de consulta (`GET`) se dejaron públicos, ya que la arquitectura y el objetivo académico lo permiten.
+
+La autorización por rol se preparó con `require_role(role)` (dependencia factory), para demostrar que **autenticación ≠ autorización**:
+- Autenticación: ¿quién eres?
+- Autorización: ¿qué puedes hacer?
+
+### Pruebas
+Secuencia ejecutada:
+1. Login correcto → 200 con `access_token`.
+2. Login con contraseña incorrecta → 401.
+3. Login con usuario inexistente → 401.
+4. Acceso a endpoint protegido sin token → 401.
+5. Acceso con token inválido → 401.
+6. Acceso con token válido → operación exitosa.
+7. GET público sin token → 200.
+8. `password_hash` y `password` **no** aparecen en la respuesta.
+9. CORS preflight OPTIONS → 200 con headers correctos.
+10. Middleware agrega headers `X-App-Name`, `X-API-Version`, `X-Response-Time`.
+11. Swagger muestra `OAuth2PasswordBearer` y botón Authorize.
+12. CRUD de Users, Devices y Loans sigue funcionando.
+13. Joins y filtros conservados.
+
+[CAPTURA: Middleware]
+[CAPTURA: Configuración CORS]
+[CAPTURA: Login]
+[CAPTURA: Token JWT]
+[CAPTURA: Swagger Authorize]
+[CAPTURA: Endpoint protegido]
+
 ### Reflexión
 
 Las migraciones son importantes porque permiten evolucionar la base de datos sin borrar la información que ya existe. En este proyecto, Alembic agregó las tablas `devices` y `loans` manteniendo los usuarios guardados.

@@ -14,6 +14,8 @@ class User(Base):
     email = Column(String, unique=True, nullable=False, index=True)
     role = Column(String, nullable=False, index=True)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
+    # Contraseña almacenada como hash bcrypt (nunca texto plano).
+    password_hash = Column(String, nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
 
     loans = relationship("Loan", back_populates="user")

@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import asyncio
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security, status
 from sqlalchemy.orm import Session
 
 from app.dependencies.database_dependency import get_db
 from app.dependencies.user_dependencies import get_user_or_404
 from app.models.user_model import User
 from app.schemas.user_schema import UserCreate, UserPatch, UserResponse, UserUpdate, UserRole
+from app.security import get_current_user, oauth2_scheme
 from app.services.user_service import (
     UserInUseError,
     SortField,
@@ -29,14 +32,15 @@ router = APIRouter(
     description="Obtiene todos los usuarios. Se pueden aplicar filtros por rol y estado, además de ordenamiento.",
     response_description="Lista de usuarios encontrados",
 )
-def get_users(
+async def get_users(
     role: UserRole | None = Query(default=None, description="Filtra por rol: admin, support o user"),
     is_active: bool | None = Query(default=None, description="Filtra por estado activo o inactivo"),
     sort_by: SortField = Query(default="created_at", description="Campo por el que se ordenan los usuarios"),
     order: SortOrder = Query(default="asc", description="Sentido del ordenamiento: asc o desc"),
     db: Session = Depends(get_db),
 ):
-    return get_all_users(
+    return await asyncio.to_thread(
+        get_all_users,
         db,
         role=role,
         is_active=is_active,
@@ -52,7 +56,8 @@ def get_users(
     description="Busca un usuario por su identificador único.",
     response_description="Usuario encontrado",
 )
-def get_user(
+async def get_user(
+    request: Request,
     user_id: int,
     current_user: User = Depends(get_user_or_404),
 ):
@@ -63,16 +68,18 @@ def get_user(
     "",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Crear usuario",
-    description="Registra un nuevo usuario en la base de datos.",
+    summary=" Crear usuario",
+    description="Registra un nuevo usuario en la base de datos. Requiere autenticación.",
     response_description="Usuario creado exitosamente",
 )
-def create_user(
+async def create_user(
+    request: Request,
     user: UserCreate,
     db: Session = Depends(get_db),
+    _: str = Security(oauth2_scheme),
 ):
     try:
-        return service_create_user(db, user)
+        return await asyncio.to_thread(service_create_user, db, user)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -80,15 +87,17 @@ def create_user(
 @router.put(
     "/{user_id}",
     response_model=UserResponse,
-    summary="Actualizar usuario completo",
-    description="Reemplaza la información de un usuario por los datos enviados.",
+    summary="Actualiza usuario completo",
+    description="Reemplaza la información de un usuario por los datos enviados. Requiere autenticación.",
     response_description="Usuario actualizado exitosamente",
 )
-def replace_user(
+async def replace_user(
+    request: Request,
     user_id: int,
     user: UserUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_user_or_404),
+    _: str = Security(oauth2_scheme),
 ):
     updates = user.model_dump(exclude_unset=True, exclude_none=True)
 
@@ -99,7 +108,7 @@ def replace_user(
         )
 
     try:
-        return service_update_user(db, user_id, user)
+        return await asyncio.to_thread(service_update_user, db, user_id, user)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except LookupError:
@@ -109,15 +118,17 @@ def replace_user(
 @router.patch(
     "/{user_id}",
     response_model=UserResponse,
-    summary="Actualizar usuario parcialmente",
-    description="Modifica solo los campos enviados. Los demás se mantienen igual.",
+    summary="Actualiza usuario parcialmente",
+    description="Modifica solo los campos enviados. Los demás se mantienen igual. Requiere autenticación.",
     response_description="Usuario actualizado parcialmente",
 )
-def partial_update_user(
+async def partial_update_user(
+    request: Request,
     user_id: int,
     user: UserPatch,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_user_or_404),
+    _: str = Security(oauth2_scheme),
 ):
     updates = user.model_dump(exclude_unset=True, exclude_none=True)
 
@@ -128,7 +139,7 @@ def partial_update_user(
         )
 
     try:
-        return service_patch_user(db, user_id, updates)
+        return await asyncio.to_thread(service_patch_user, db, user_id, updates)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except LookupError:
@@ -139,16 +150,18 @@ def partial_update_user(
     "/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Eliminar usuario",
-    description="Elimina un usuario del sistema por su ID.",
+    description="Elimina un usuario del sistema por su ID. Requiere autenticación.",
     response_description="Usuario eliminado exitosamente",
 )
-def remove_user(
+async def remove_user(
+    request: Request,
     user_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_user_or_404),
+    _: str = Security(oauth2_scheme),
 ):
     try:
-        service_delete_user(db, user_id)
+        await asyncio.to_thread(service_delete_user, db, user_id)
     except UserInUseError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except LookupError:
